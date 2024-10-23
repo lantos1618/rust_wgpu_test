@@ -244,6 +244,14 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 self.render_frame();
             }
+            WindowEvent::KeyboardInput { device_id, event, is_synthetic } => {
+                if event.state == winit::event::ElementState::Pressed {
+                    println!("Key pressed: {:?}", event.physical_key);
+                }
+            }
+            WindowEvent::CursorMoved { device_id, position } => {
+                println!("Cursor moved to {:?}", position);
+            }
             _ => (),
         }
     }
