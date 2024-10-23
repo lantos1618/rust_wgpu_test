@@ -3,6 +3,7 @@ use winit::{
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
+    dpi::PhysicalPosition,
 };
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -69,6 +70,13 @@ struct Uniforms {
     aspect_ratio: f32,
 }
 
+// Add this new struct after the Uniforms struct
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct MouseState {
+    position: [f32; 2],
+}
+
 // Update the App struct to include the new uniform buffer and bind group
 struct App {
     window: Option<Arc<Window>>,
@@ -82,6 +90,7 @@ struct App {
     num_vertices: u32,
     uniform_buffer: Option<wgpu::Buffer>,
     uniform_bind_group: Option<wgpu::BindGroup>,
+    mouse_state: MouseState,
 }
 
 impl App {
@@ -98,6 +107,7 @@ impl App {
             num_vertices: 0,
             uniform_buffer: None,
             uniform_bind_group: None,
+            mouse_state: MouseState { position: [0.0, 0.0] },
         }
     }
 
@@ -108,6 +118,7 @@ impl App {
             queue.write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
         }
     }
+
 
     async fn initialize_wgpu(&mut self, window: Arc<Window>) {
         // Create instance
@@ -141,12 +152,12 @@ impl App {
             .await
             .expect("Failed to create device");
 
-        // Replace the triangle vertices with shape handling
-        self.shapes.push(Shape::Circle {
+        // Update the circle creation with a smaller radius
+        self.shapes = vec![Shape::Circle {
             center: [0.0, 0.0],
-            radius: 0.5,
-            segments: 64,  // Increased from 32 for smoother circle
-        });
+            radius: 0.05, // Smaller radius (was 0.5)
+            segments: 32,
+        }];
 
         // Generate vertices for all shapes
         let mut vertices = Vec::new();
@@ -322,6 +333,8 @@ impl App {
             frame.present();
         }
     }
+
+
 }
 
 impl ApplicationHandler for App {
@@ -351,13 +364,14 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 self.render_frame();
             }
-            WindowEvent::KeyboardInput { device_id, event, is_synthetic } => {
+            WindowEvent::KeyboardInput { device_id: _, event, is_synthetic: _ } => {
                 if event.state == winit::event::ElementState::Pressed {
                     println!("Key pressed: {:?}", event.physical_key);
                 }
             }
-            WindowEvent::CursorMoved { device_id, position } => {
-                println!("Cursor moved to {:?}", position);
+            WindowEvent::CursorMoved { device_id: _, position } => {
+                self.mouse_state.position = self.window_position_to_ndc(&position);
+                self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),
         }
