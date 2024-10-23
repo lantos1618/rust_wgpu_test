@@ -1009,20 +1009,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_test"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy_prototype_lyon",
- "bytemuck",
- "futures",
- "pollster",
- "tokio",
- "wgpu 22.1.0",
- "winit",
-]
-
-[[package]]
 name = "bevy_text"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3481,6 +3467,20 @@ dependencies = [
  "bitflags 2.6.0",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "rust_wgpu_test"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_prototype_lyon",
+ "bytemuck",
+ "futures",
+ "pollster",
+ "tokio",
+ "wgpu 22.1.0",
+ "winit",
 ]
 
 [[package]]
