@@ -26,6 +26,50 @@ impl Vertex {
     }
 }
 
+// New shape-related structures
+#[derive(Debug)]
+enum Shape {
+    Circle { center: [f32; 2], radius: f32, segments: u32 },
+    // We can add more shapes here later: Rectangle, Triangle, etc.
+}
+
+impl Shape {
+    fn generate_vertices(&self) -> Vec<Vertex> {
+        match self {
+            Shape::Circle { center, radius, segments } => {
+                let mut vertices = Vec::with_capacity((*segments as usize + 2) * 3);
+                
+                // Generate circle vertices
+                for i in 0..*segments {
+                    // Add center vertex
+                    vertices.push(Vertex { position: *center });
+                    
+                    // Add first point of the triangle
+                    let angle1 = (i as f32 * 2.0 * std::f32::consts::PI) / *segments as f32;
+                    let x1 = center[0] + radius * angle1.cos();
+                    let y1 = center[1] + radius * angle1.sin();
+                    vertices.push(Vertex { position: [x1, y1] });
+                    
+                    // Add second point of the triangle
+                    let angle2 = ((i + 1) as f32 * 2.0 * std::f32::consts::PI) / *segments as f32;
+                    let x2 = center[0] + radius * angle2.cos();
+                    let y2 = center[1] + radius * angle2.sin();
+                    vertices.push(Vertex { position: [x2, y2] });
+                }
+                vertices
+            }
+        }
+    }
+}
+
+// Add this after the Vertex struct
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Uniforms {
+    aspect_ratio: f32,
+}
+
+// Update the App struct to include the new uniform buffer and bind group
 struct App {
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
@@ -34,6 +78,10 @@ struct App {
     render_pipeline: Option<wgpu::RenderPipeline>,
     vertex_buffer: Option<wgpu::Buffer>,
     config: Option<wgpu::SurfaceConfiguration>,
+    shapes: Vec<Shape>,
+    num_vertices: u32,
+    uniform_buffer: Option<wgpu::Buffer>,
+    uniform_bind_group: Option<wgpu::BindGroup>,
 }
 
 impl App {
@@ -46,6 +94,18 @@ impl App {
             render_pipeline: None,
             vertex_buffer: None,
             config: None,
+            shapes: Vec::new(),
+            num_vertices: 0,
+            uniform_buffer: None,
+            uniform_bind_group: None,
+        }
+    }
+
+    fn update_uniform_buffer(&self, width: u32, height: u32) {
+        if let (Some(queue), Some(uniform_buffer)) = (&self.queue, &self.uniform_buffer) {
+            let aspect_ratio = height as f32 / width as f32;
+            let uniforms = Uniforms { aspect_ratio };
+            queue.write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
         }
     }
 
@@ -81,17 +141,24 @@ impl App {
             .await
             .expect("Failed to create device");
 
-        // Define triangle vertices
-        const VERTICES: &[Vertex] = &[
-            Vertex { position: [0.0, 0.5] },    // Top center
-            Vertex { position: [-0.5, -0.5] },  // Bottom left
-            Vertex { position: [0.5, -0.5] },   // Bottom right
-        ];
+        // Replace the triangle vertices with shape handling
+        self.shapes.push(Shape::Circle {
+            center: [0.0, 0.0],
+            radius: 0.5,
+            segments: 64,  // Increased from 32 for smoother circle
+        });
 
-        // Create vertex buffer
+        // Generate vertices for all shapes
+        let mut vertices = Vec::new();
+        for shape in &self.shapes {
+            vertices.extend(shape.generate_vertices());
+        }
+        self.num_vertices = vertices.len() as u32;
+
+        // Create vertex buffer with the generated vertices
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
+            contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
@@ -101,10 +168,45 @@ impl App {
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!("shader.wgsl"))),
         });
 
-        // Create pipeline layout
+        // Create uniform buffer
+        let uniforms = Uniforms {
+            aspect_ratio: window.inner_size().height as f32 / window.inner_size().width as f32,
+        };
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[uniforms]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group layout
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Bind Group Layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        // Create bind group
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Uniform Bind Group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        // Update pipeline layout to include the bind group layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Pipeline Layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -164,11 +266,13 @@ impl App {
         self.render_pipeline = Some(render_pipeline);
         self.vertex_buffer = Some(vertex_buffer);
         self.config = Some(config);
+        self.uniform_buffer = Some(uniform_buffer);
+        self.uniform_bind_group = Some(uniform_bind_group);
     }
 
     fn render_frame(&self) {
-        if let (Some(surface), Some(device), Some(queue), Some(render_pipeline), Some(vertex_buffer)) =
-            (&self.surface, &self.device, &self.queue, &self.render_pipeline, &self.vertex_buffer)
+        if let (Some(surface), Some(device), Some(queue), Some(render_pipeline), Some(vertex_buffer), Some(uniform_bind_group)) =
+            (&self.surface, &self.device, &self.queue, &self.render_pipeline, &self.vertex_buffer, &self.uniform_bind_group)
         {
             // Get texture for current frame
             let frame = surface
@@ -208,8 +312,9 @@ impl App {
                 });
 
                 render_pass.set_pipeline(render_pipeline);
+                render_pass.set_bind_group(0, uniform_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                render_pass.draw(0..3, 0..1);
+                render_pass.draw(0..self.num_vertices, 0..1);
             }
 
             // Submit command buffer and present frame
@@ -238,6 +343,8 @@ impl ApplicationHandler for App {
                     config.width = new_size.width.max(1);
                     config.height = new_size.height.max(1);
                     surface.configure(device, config);
+                    // Update aspect ratio when window is resized
+                    self.update_uniform_buffer(new_size.width, new_size.height);
                     self.window.as_ref().unwrap().request_redraw();
                 }
             }
