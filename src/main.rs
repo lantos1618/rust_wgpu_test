@@ -152,12 +152,22 @@ impl App {
             .await
             .expect("Failed to create device");
 
-        // Update the circle creation with a smaller radius
-        self.shapes = vec![Shape::Circle {
-            center: [0.0, 0.0],
-            radius: 0.05, // Smaller radius (was 0.5)
-            segments: 32,
-        }];
+        // Create a grid of circles
+        let grid_size = 32; // 32x32 = 1024 circles
+        let spacing = 2.0 / grid_size as f32; // Spread across -1 to 1 range
+        let radius = spacing * 0.4; // Make circles slightly smaller than spacing
+
+        self.shapes = (0..grid_size).flat_map(|row| {
+            (0..grid_size).map(move |col| {
+                let x = -1.0 + spacing * (col as f32 + 0.5);
+                let y = -1.0 + spacing * (row as f32 + 0.5);
+                Shape::Circle {
+                    center: [x, y],
+                    radius,
+                    segments: 32,
+                }
+            })
+        }).collect();
 
         // Generate vertices for all shapes
         let mut vertices = Vec::new();
@@ -370,7 +380,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::CursorMoved { device_id: _, position } => {
-                self.mouse_state.position = self.window_position_to_ndc(&position);
+                self.mouse_state.position = [position.x as f32, position.y as f32];
                 self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),
